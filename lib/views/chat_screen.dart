@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../controllers/chat_controller.dart';
+import 'dart:async';
 
 class ChatScreen extends StatefulWidget {
   final String chatRoomId;
@@ -20,21 +21,37 @@ class _ChatScreenState extends State<ChatScreen> {
   final ChatController _chatController = ChatController();
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  Timer? _typingTimer;
+  bool _isTyping = false;
 
   @override
   void initState() {
     super.initState();
-    // Scroll to bottom when messages load
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottom();
-    });
+    // Start listening to typing updates
+    _messageController.addListener(_onTypingChanged);
   }
 
   @override
   void dispose() {
+    _messageController.removeListener(_onTypingChanged);
+    _typingTimer?.cancel();
+    _chatController.updateTypingStatus(widget.chatRoomId, false);
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onTypingChanged() {
+    if (_messageController.text.isNotEmpty && !_isTyping) {
+      _isTyping = true;
+      _chatController.updateTypingStatus(widget.chatRoomId, true);
+    }
+
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(milliseconds: 1000), () {
+      _isTyping = false;
+      _chatController.updateTypingStatus(widget.chatRoomId, false);
+    });
   }
 
   void _scrollToBottom() {
@@ -70,11 +87,41 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.otherUserName),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.otherUserName),
+            StreamBuilder<DocumentSnapshot>(
+              stream: _chatController.getTypingStatus(widget.chatRoomId),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const SizedBox.shrink();
+                
+                final data = snapshot.data!.data() as Map<String, dynamic>?;
+                final typing = data?['typing'] as Map<String, dynamic>?;
+                
+                if (typing == null) return const SizedBox.shrink();
+                
+                // Check if the other user is typing
+                final isOtherUserTyping = typing.entries
+                    .where((e) => e.key != _chatController.currentUserId)
+                    .any((e) => e.value == true);
+
+                if (!isOtherUserTyping) return const SizedBox.shrink();
+                
+                return const Text(
+                  'typing...',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
       body: Column(
         children: [
-          // Messages list
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _chatController.getMessages(widget.chatRoomId),
@@ -91,20 +138,29 @@ class _ChatScreenState extends State<ChatScreen> {
                   return const Center(child: Text('No messages yet'));
                 }
 
-                // Schedule scroll to bottom after build
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _scrollToBottom();
-                });
+                final messages = snapshot.data!.docs;
+                
+                // Mark messages as read
+                final otherUserMessages = messages.where(
+                  (doc) => doc['senderId'] != _chatController.currentUserId,
+                );
+                if (otherUserMessages.isNotEmpty) {
+                  _chatController.markMessagesAsRead(
+                    widget.chatRoomId,
+                    otherUserMessages.first['senderId'],
+                  );
+                }
 
                 return ListView.builder(
+                  reverse: true,
                   controller: _scrollController,
                   padding: const EdgeInsets.all(8),
-                  itemCount: snapshot.data!.docs.length,
+                  itemCount: messages.length,
                   itemBuilder: (context, index) {
-                    final messageData = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                    final messageData = messages[index].data() as Map<String, dynamic>;
                     final isMe = messageData['senderId'] == _chatController.currentUserId;
-                    final timestamp = messageData['timestamp'] as Timestamp?;
-                    final time = timestamp?.toDate() ?? DateTime.now();
+                    final message = messageData['message'] as String? ?? '';
+                    final isRead = messageData['read'] as bool? ?? false;
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -116,23 +172,24 @@ class _ChatScreenState extends State<ChatScreen> {
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Column(
-                          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: isMe
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
                           children: [
                             Text(
-                              messageData['message'] ?? '',
+                              message,
                               style: TextStyle(
                                 color: isMe ? Colors.white : Colors.black,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${time.hour}:${time.minute.toString().padLeft(2, '0')}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: isMe ? Colors.white70 : Colors.black54,
+                            if (isMe) ...[
+                              const SizedBox(height: 2),
+                              Icon(
+                                isRead ? Icons.done_all : Icons.done,
+                                size: 16,
+                                color: Colors.white70,
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       ),
@@ -142,37 +199,24 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-          // Message input
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-            ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _messageController,
-                    decoration: InputDecoration(
+                    decoration: const InputDecoration(
                       hintText: 'Type a message...',
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.all(Radius.circular(24)),
                       ),
-                      filled: true,
-                      fillColor: Theme.of(context).scaffoldBackgroundColor,
-                      contentPadding: const EdgeInsets.symmetric(
+                      contentPadding: EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 8,
                       ),
                     ),
+                    maxLines: null,
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _sendMessage(),
                   ),
@@ -180,7 +224,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 const SizedBox(width: 8),
                 FloatingActionButton(
                   onPressed: _sendMessage,
-                  mini: true,
                   child: const Icon(Icons.send),
                 ),
               ],

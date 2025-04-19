@@ -64,40 +64,83 @@ class ChatController {
     }
   }
 
-  // Send message
+  // Send message with enhanced metadata
   Future<void> sendMessage(String chatRoomId, String message) async {
+    final timestamp = FieldValue.serverTimestamp();
+    final messageDoc = {
+      'senderId': currentUserId,
+      'message': message.trim(),
+      'timestamp': timestamp,
+      'read': false, // Explicitly set to false when sending
+    };
+
     try {
+      // Add message to chat room
       await _firestore
           .collection('chat_rooms')
           .doc(chatRoomId)
           .collection('messages')
-          .add({
-        'senderId': currentUserId,
-        'message': message,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+          .add(messageDoc);
 
-      // Update last message in chat room
+      // Update chat room with last message
       await _firestore.collection('chat_rooms').doc(chatRoomId).update({
-        'lastMessage': message,
-        'lastMessageTime': FieldValue.serverTimestamp(),
+        'lastMessage': message.trim(),
+        'lastMessageTime': timestamp,
+        'lastSenderId': currentUserId,
       });
-
-      print('Message sent successfully');
     } catch (e) {
       print('Error sending message: $e');
       rethrow;
     }
   }
 
-  // Get messages stream
+  // Get messages stream with pagination
   Stream<QuerySnapshot> getMessages(String chatRoomId) {
-    print('Getting messages for chat room: $chatRoomId');
     return _firestore
         .collection('chat_rooms')
         .doc(chatRoomId)
         .collection('messages')
-        .orderBy('timestamp', descending: false)
+        .orderBy('timestamp', descending: true)
+        .limit(50)
+        .snapshots();
+  }
+
+  // Mark messages as read
+  Future<void> markMessagesAsRead(String chatRoomId, String senderId) async {
+    if (senderId == currentUserId) return; // Don't mark own messages
+
+    try {
+      final messagesQuery = await _firestore
+          .collection('chat_rooms')
+          .doc(chatRoomId)
+          .collection('messages')
+          .where('senderId', isEqualTo: senderId)
+          .where('read', isEqualTo: false)
+          .get();
+
+      final batch = _firestore.batch();
+      for (var doc in messagesQuery.docs) {
+        batch.update(doc.reference, {'read': true});
+      }
+      await batch.commit();
+    } catch (e) {
+      print('Error marking messages as read: $e');
+      // Don't rethrow as this is not critical
+    }
+  }
+
+  // Update typing status
+  Future<void> updateTypingStatus(String chatRoomId, bool isTyping) async {
+    await _firestore.collection('chat_rooms').doc(chatRoomId).update({
+      'typing.${currentUserId}': isTyping,
+    });
+  }
+
+  // Get typing status stream
+  Stream<DocumentSnapshot> getTypingStatus(String chatRoomId) {
+    return _firestore
+        .collection('chat_rooms')
+        .doc(chatRoomId)
         .snapshots();
   }
 }
