@@ -1,8 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import '../models/user_model.dart';
 
 class AuthController {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -27,10 +24,8 @@ class AuthController {
           'initialized': true,
           'timestamp': FieldValue.serverTimestamp(),
         });
-        print(3);
         // Delete the dummy document
         await _firestore.collection('users').doc('dummy').delete();
-        print(4);
       }
     } catch (e) {
       print('Error initializing collections: $e');
@@ -39,13 +34,15 @@ class AuthController {
   }
 
   // Sign up
-  Future<UserCredential> signUp(String email, String password, String name) async {
+  Future<UserCredential> signUp(
+      String email, String password, String name) async {
     try {
       // Initialize collections if needed
       await _initializeCollections();
 
       print("5 =================== $name $email $password");
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+      UserCredential userCredential =
+          await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -86,7 +83,10 @@ class AuthController {
       );
 
       // Update online status
-      await _firestore.collection('users').doc(userCredential.user!.uid).update({
+      await _firestore
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .update({
         'isOnline': true,
         'lastSeen': FieldValue.serverTimestamp(),
       });
