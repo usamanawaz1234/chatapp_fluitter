@@ -1,14 +1,16 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:chatapp/services/media_upload_service.dart';
 
 class ChatController {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Get current user ID
   String get currentUserId => _auth.currentUser?.uid ?? '';
 
-  // Get all users except current user
   Stream<QuerySnapshot> getAllUsers() {
     return _firestore
         .collection('users')
@@ -16,32 +18,21 @@ class ChatController {
         .snapshots();
   }
 
-  // Get or create chat room ID
   Future<String> getChatRoomId(String otherUserId) async {
-    // Sort IDs to ensure consistent chat room ID
     List<String> ids = [currentUserId, otherUserId];
     ids.sort();
     String chatRoomId = ids.join('_');
 
     try {
-      // Check if chat room exists
-      DocumentSnapshot chatRoom = await _firestore
-          .collection('chat_rooms')
-          .doc(chatRoomId)
-          .get();
+      DocumentSnapshot chatRoom =
+          await _firestore.collection('chat_rooms').doc(chatRoomId).get();
 
       if (!chatRoom.exists) {
-        // Get user details
-        DocumentSnapshot currentUserDoc = await _firestore
-            .collection('users')
-            .doc(currentUserId)
-            .get();
-        DocumentSnapshot otherUserDoc = await _firestore
-            .collection('users')
-            .doc(otherUserId)
-            .get();
+        DocumentSnapshot currentUserDoc =
+            await _firestore.collection('users').doc(currentUserId).get();
+        DocumentSnapshot otherUserDoc =
+            await _firestore.collection('users').doc(otherUserId).get();
 
-        // Create new chat room with user details
         await _firestore.collection('chat_rooms').doc(chatRoomId).set({
           'participants': {
             currentUserId: currentUserDoc.data() as Map<String, dynamic>?,
@@ -51,12 +42,7 @@ class ChatController {
           'lastMessageTime': FieldValue.serverTimestamp(),
           'createdAt': FieldValue.serverTimestamp(),
         });
-
-        print('Created new chat room: $chatRoomId');
-      } else {
-        print('Using existing chat room: $chatRoomId');
       }
-
       return chatRoomId;
     } catch (e) {
       print('Error creating/getting chat room: $e');
@@ -64,50 +50,75 @@ class ChatController {
     }
   }
 
-  // Send message with enhanced metadata
-  Future<void> sendMessage(String chatRoomId, String message) async {
-    final timestamp = FieldValue.serverTimestamp();
-    final messageDoc = {
-      'senderId': currentUserId,
-      'message': message.trim(),
-      'timestamp': timestamp,
-      'read': false, // Explicitly set to false when sending
-    };
-
+  Future<void> sendMessage(String roomId, String message,
+      [String mediaType = 'text']) async {
     try {
-      // Add message to chat room
       await _firestore
           .collection('chat_rooms')
-          .doc(chatRoomId)
+          .doc(roomId)
           .collection('messages')
-          .add(messageDoc);
-
-      // Update chat room with last message
-      await _firestore.collection('chat_rooms').doc(chatRoomId).update({
-        'lastMessage': message.trim(),
-        'lastMessageTime': timestamp,
-        'lastSenderId': currentUserId,
+          .add({
+        'senderId': currentUserId,
+        'message': message,
+        'mediaType': mediaType,
+        'timestamp': FieldValue.serverTimestamp(),
+        'read': false,
       });
     } catch (e) {
-      print('Error sending message: $e');
+      debugPrint('Error sending message: $e');
       rethrow;
     }
   }
 
-  // Get messages stream with pagination
-  Stream<QuerySnapshot> getMessages(String chatRoomId) {
+  Query<Map<String, dynamic>> getMessages(String roomId) {
     return _firestore
         .collection('chat_rooms')
-        .doc(chatRoomId)
+        .doc(roomId)
         .collection('messages')
-        .orderBy('timestamp', descending: true)
-        .limit(50)
-        .snapshots();
+        .orderBy('timestamp', descending: true);
   }
 
-  // Mark messages as read
+  Future<void> sendMediaMessage(
+      String chatRoomId, File file, String mediaType) async {
+    try {
+      String? mediaUrl;
+
+      if (mediaType == 'image') {
+        mediaUrl = await MediaUploadService.uploadImage(file);
+      } else if (mediaType == 'video') {
+        mediaUrl = await MediaUploadService.uploadVideo(file);
+      }
+
+      if (mediaUrl == null) {
+        throw Exception('Failed to upload media');
+      }
+
+      await _firestore
+          .collection('chat_rooms')
+          .doc(chatRoomId)
+          .collection('messages')
+          .add({
+        'senderId': currentUserId,
+        'message': mediaType == 'image' ? '📷 Photo' : '📹 Video',
+        'mediaType': mediaType,
+        'mediaUrl': mediaUrl,
+        'timestamp': FieldValue.serverTimestamp(),
+        'read': false,
+      });
+
+      await _firestore.collection('chat_rooms').doc(chatRoomId).update({
+        'lastMessage': mediaType == 'image' ? '📷 Photo' : '📹 Video',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'lastSenderId': currentUserId,
+      });
+    } catch (e) {
+      debugPrint('Error sending media message: $e');
+      rethrow;
+    }
+  }
+
   Future<void> markMessagesAsRead(String chatRoomId, String senderId) async {
-    if (senderId == currentUserId) return; // Don't mark own messages
+    if (senderId == currentUserId) return;
 
     try {
       final messagesQuery = await _firestore
@@ -125,22 +136,16 @@ class ChatController {
       await batch.commit();
     } catch (e) {
       print('Error marking messages as read: $e');
-      // Don't rethrow as this is not critical
     }
   }
 
-  // Update typing status
   Future<void> updateTypingStatus(String chatRoomId, bool isTyping) async {
     await _firestore.collection('chat_rooms').doc(chatRoomId).update({
       'typing.${currentUserId}': isTyping,
     });
   }
 
-  // Get typing status stream
   Stream<DocumentSnapshot> getTypingStatus(String chatRoomId) {
-    return _firestore
-        .collection('chat_rooms')
-        .doc(chatRoomId)
-        .snapshots();
+    return _firestore.collection('chat_rooms').doc(chatRoomId).snapshots();
   }
 }

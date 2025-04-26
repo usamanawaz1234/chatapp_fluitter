@@ -78,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       MaterialPageRoute(
                         builder: (context) => ChatScreen(
                           chatRoomId: chatRoomId,
-                          otherUserName: user.name,
+                          chatController: _chatController,
                         ),
                       ),
                     );
@@ -93,7 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => UserListScreen()),
+            MaterialPageRoute(builder: (context) => UserListScreen(chatController: _chatController)),
           );
         },
         child: const Icon(Icons.chat),

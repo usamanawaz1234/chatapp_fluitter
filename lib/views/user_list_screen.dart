@@ -4,9 +4,9 @@ import '../controllers/chat_controller.dart';
 import 'chat_screen.dart';
 
 class UserListScreen extends StatelessWidget {
-  final ChatController _chatController = ChatController();
+  final ChatController chatController;
 
-  UserListScreen({super.key});
+  const UserListScreen({super.key, required this.chatController});
 
   @override
   Widget build(BuildContext context) {
@@ -15,7 +15,7 @@ class UserListScreen extends StatelessWidget {
         title: const Text('Select User'),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _chatController.getAllUsers(),
+        stream: chatController.getAllUsers(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
@@ -43,7 +43,7 @@ class UserListScreen extends StatelessWidget {
                 subtitle: Text(userData['email'] ?? ''),
                 onTap: () async {
                   // Get chat room ID
-                  String chatRoomId = await _chatController.getChatRoomId(userId);
+                  String chatRoomId = await chatController.getChatRoomId(userId);
                   
                   // Navigate to chat screen
                   if (context.mounted) {
@@ -52,7 +52,7 @@ class UserListScreen extends StatelessWidget {
                       MaterialPageRoute(
                         builder: (context) => ChatScreen(
                           chatRoomId: chatRoomId,
-                          otherUserName: userData['name'] ?? 'Unknown',
+                          chatController: chatController,
                         ),
                       ),
                     );

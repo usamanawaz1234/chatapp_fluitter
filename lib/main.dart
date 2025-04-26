@@ -2,6 +2,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'config/supabase_config.dart';
+
 import 'controllers/auth_controller.dart';
 import 'views/home_screen.dart';
 import 'views/login_screen.dart';
@@ -11,9 +13,10 @@ Future<void> main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp();
-    print('Firebase initialized successfully');
+    await SupabaseConfig.initialize();
+    print('Firebase and Supabase initialized successfully');
   } catch (e) {
-    print('Error initializing Firebase: $e');
+    print('Error initializing services: $e');
   }
   runApp(const MyApp());
 }
